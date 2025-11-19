@@ -8,6 +8,8 @@ export const renderVertexShader = `
 uniform sampler2D uPositions;
 uniform float uPointSize;
 uniform float uPixelRatio;
+uniform vec3 uColorBase;
+uniform vec3 uColorActive;
 
 attribute vec2 reference; // UV coordinate to read from texture
 
@@ -34,8 +36,9 @@ void main() {
   
   // Color variation
   // Base blueish, shift to white/bright cyan on high velocity
-  vec3 colorBase = vec3(0.1, 0.5, 0.9);
-  vec3 colorActive = vec3(0.4, 0.9, 1.0);
+  // Base blueish, shift to white/bright cyan on high velocity
+  vec3 colorBase = uColorBase;
+  vec3 colorActive = uColorActive;
   
   vColor = mix(colorBase, colorActive, velocity);
   vAlpha = 0.6 + velocity * 0.4;

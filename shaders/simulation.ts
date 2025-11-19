@@ -11,6 +11,10 @@ uniform sampler2D uOriginalPositions;
 uniform vec2 uMouse;
 uniform float uTime;
 uniform float uHover;
+uniform float uRingRadius;
+uniform float uRingWidth;
+uniform float uRingDisplacement;
+uniform float uReturnStrength;
 
 varying vec2 vUv;
 
@@ -104,10 +108,8 @@ void main() {
   float life = currentPos.w; 
   float velocity = 0.0;
 
-  // The "Ring" interaction logic from request
-  float uRingRadius = 5.0; 
-  float uRingWidth = 1.5;
-  float uRingDisplacement = 12.0; 
+  // The "Ring" interaction logic
+  // Uniforms controlled by GUI
   
   // Use the mouse position passed in
   vec2 uRingPos = uMouse; 
@@ -143,7 +145,7 @@ void main() {
   
   // Always try to return home
   vec3 homeDir = refPos - pos;
-  float returnStrength = 0.05 + (life * 0.04); // Randomize return speed
+  float returnStrength = uReturnStrength + (life * 0.04); // Randomize return speed
   
   // If we are being pushed by the ring, return force is weaker or overpowered
   // If not pushed, we spring back

@@ -2,16 +2,18 @@ import React, { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { FBOParticles } from './components/FBOParticles';
 import { Loader } from '@react-three/drei';
+import { Leva } from 'leva';
 
 const App: React.FC = () => {
   return (
-    <div className="relative w-full h-screen bg-[#050505]">
+    <div className="relative w-full h-screen bg-white">
+      <Leva collapsed={false} />
       {/* UI Overlay */}
-      <div className="absolute top-0 left-0 z-10 p-8 text-white pointer-events-none">
+      <div className="absolute top-0 left-0 z-10 p-8 text-black pointer-events-none">
         <h1 className="text-4xl font-bold tracking-tighter mb-2 bg-gradient-to-r from-cyan-400 to-blue-600 bg-clip-text text-transparent">
           GPGPU Particles
         </h1>
-        <p className="text-sm text-gray-400 max-w-md font-light leading-relaxed">
+        <p className="text-sm text-gray-600 max-w-md font-light leading-relaxed">
           A simulation of 65,536 particles computed entirely on the GPU using Frame Buffer Objects (FBO).
           Move your mouse to interact with the field via a custom repulsion shader.
         </p>
@@ -28,7 +30,7 @@ const App: React.FC = () => {
         dpr={[1, 2]} // Handle high DPI screens
         gl={{ antialias: false, alpha: false }} // Optimize performance
       >
-        <color attach="background" args={['#050505']} />
+        <color attach="background" args={['#ffffff']} />
         <Suspense fallback={null}>
           <FBOParticles />
         </Suspense>
