@@ -1,0 +1,5 @@
+{
+  "name": "GPGPU Particle Flow",
+  "description": "A high-performance WebGL particle simulation using Three.js, GPGPU (FBO) techniques, and custom shaders to recreate organic, fluid particle interactions.",
+  "requestFramePermissions": []
+}
