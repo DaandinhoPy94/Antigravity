@@ -9,6 +9,9 @@ export const simulationFragmentShader = `
 uniform sampler2D uPositions;
 uniform sampler2D uOriginalPositions;
 uniform vec2 uMouse;
+uniform vec2 uMouseVel; // New: Mouse Velocity
+uniform float uAspect; // New: Aspect Ratio
+uniform float uGravityMode; // New: 0 = Attract, 1 = Repel
 uniform float uTime;
 uniform float uHover;
 uniform float uRingRadius;
@@ -105,61 +108,117 @@ void main() {
   
   vec3 pos = currentPos.xyz;
   vec3 refPos = originalPos.xyz;
+  // We use the w component for velocity magnitude storage for the render shader
   float life = currentPos.w; 
-  float velocity = 0.0;
+  
+  // Calculate velocity (current - previous position would be ideal, but we modify pos directly here)
+  // So we will calculate the "force" applied this frame
+  vec3 velocity = vec3(0.0);
 
-  // The "Ring" interaction logic
-  // Uniforms controlled by GUI
-  
-  // Use the mouse position passed in
-  vec2 uRingPos = uMouse; 
-  
-  // Calculate distance between current particle and mouse ring center
-  float dist = distance(pos.xy, uRingPos);
-  
-  // Add some noise to the distance check to make the ring edge irregular/organic
-  float noise0 = snoise(vec3(pos.xy * 0.2 + vec2(18.4924, 72.9744), uTime * 0.5));
-  float dist1 = distance(pos.xy + (noise0 * 0.2), uRingPos);
+  // 1. RETURN TO HOME
+  // Particles always try to go back to their original position
+  vec3 homeDir = refPos - pos;
+  float returnSpeed = uReturnStrength; // Use UI control
+  velocity += homeDir * returnSpeed;
 
-  // Create the ring influence factor 't'
-  // This creates a band where particles are affected
-  float t = smoothstep(uRingRadius - (uRingWidth * 2.0), uRingRadius, dist) 
-          - smoothstep(uRingRadius, uRingRadius + uRingWidth, dist1);
-          
-  // Another layer of ring influence for more detail
-  float t2 = smoothstep(uRingRadius - (uRingWidth * 2.0), uRingRadius, dist) 
-           - smoothstep(uRingRadius, uRingRadius + uRingWidth * 0.5, dist1);
+  // 2. MOUSE INTERACTION (Repulsion / Attraction)
+  // Adjust positions for aspect ratio to ensure circular interaction
+  vec2 aspectMouse = uMouse;
+  aspectMouse.x *= uAspect;
+  vec2 aspectPos = pos.xy;
+  aspectPos.x *= uAspect;
 
-  // Apply the force
-  // The particle is pushed away from the mouse based on the ring factor
-  // Note: logic adapted to "pos -= ..." means pushing/pulling based on vector math
+  // Calculate distance and direction
+  vec2 dirToParticle = aspectPos - aspectMouse;
+  float dist = length(dirToParticle);
   
-  vec2 disp = vec2(0.0); // Could add extra noise displacement here
+  // Dynamic Radius based on mouse speed
+  float mouseSpeed = length(uMouseVel);
+  // Use uRingRadius from UI as base (scaled down to UV space)
+  float baseRadius = uRingRadius * 0.05; 
+  float dynamicRadius = baseRadius + (mouseSpeed * 4.0);
+  dynamicRadius = clamp(dynamicRadius, 0.05, 0.8); // Max radius
+
+  // Noise for organic wave effect
+  float noiseVal = snoise(vec3(aspectPos.x * 3.0, aspectPos.y * 3.0, uTime * 0.5));
+
+  // GLOBAL INFLUENCE
+  // We want the mouse to affect ALL particles, not just those in a radius.
+  // However, the effect should decay with distance.
   
-  // Only apply if hovering
   if (uHover > 0.5) {
-      pos.xy -= (uRingPos - (pos.xy + disp)) * pow(t2, 0.75) * uRingDisplacement * 0.1;
+      vec2 pushDir = normalize(dirToParticle);
+      
+      // Calculate a global force based on inverse distance
+      // Add a small epsilon to prevent division by zero
+      float globalForce = 1.0 / (dist * 2.0 + 0.1);
+      
+      // Scale by mouse speed? 
+      // The user wants "movement of the mouse to ensure there is always movement".
+      // So even if mouse is slow, there should be some effect, but speed makes it stronger.
+      float speedFactor = 0.2 + mouseSpeed * 3.0;
+      
+      // Use uRingDisplacement as the master strength control
+      float strength = globalForce * speedFactor * uRingDisplacement * 0.01;
+      
+      // Apply noise to the direction for organic feel
+      float noiseInfluence = noiseVal * 0.5;
+      
+      if (uGravityMode > 0.5) {
+          // --- ANTIGRAVITY (Repulsion) ---
+          // Push away. Stronger near center.
+          // We use the dynamic radius concept for the "shockwave" but keep a global weak push.
+          
+          float repelForce = strength;
+          
+          // If within the "shockwave" radius, boost the force significantly
+          if (dist < dynamicRadius) {
+             repelForce *= 5.0;
+          }
+          
+          velocity.x += pushDir.x * repelForce * (1.0 + noiseInfluence);
+          velocity.y += pushDir.y * repelForce * (1.0 + noiseInfluence);
+          
+      } else {
+          // --- GRAVITY (Attraction) ---
+          // Pull towards mouse.
+          // Gravity usually works as 1/r^2, but for visual stability 1/r is often better.
+          
+          // We want a "swirling" black hole effect maybe? Or just direct pull.
+          // Let's do direct pull but with a twist (curl noise) if possible? 
+          // For now, direct pull.
+          
+          velocity.x -= pushDir.x * strength * (1.0 + noiseInfluence);
+          velocity.y -= pushDir.y * strength * (1.0 + noiseInfluence);
+      }
   }
 
-  // --- Physics / Restoration ---
-  
-  // Always try to return home
-  vec3 homeDir = refPos - pos;
-  float returnStrength = uReturnStrength + (life * 0.04); // Randomize return speed
-  
-  // If we are being pushed by the ring, return force is weaker or overpowered
-  // If not pushed, we spring back
-  
-  pos += homeDir * returnStrength;
-  
-  // Dampen velocity (simulated by just moving position directly here for stability)
-  
-  // Update life/velocity for visual shader to use
-  // We store "how disturbed" the particle is in the w component
-  float disturbance = length(pos - refPos);
-  velocity = smoothstep(0.0, 2.0, disturbance);
+  // 3. APPLY VELOCITY TO POSITION
+  pos += velocity;
 
-  gl_FragColor = vec4(pos, velocity);
+  // 4. FRICTION & LIMIT
+  // We don't have a persistent velocity buffer, so we simulate friction by just not moving too far
+  // But since we are adding to 'pos' based on 'homeDir' every frame, it acts like a spring.
+  // To make it stable, we can clamp the movement.
+  
+  // Actually, the requested logic implies a persistent velocity model, but this shader 
+  // is a position-update shader. 
+  // "vel += homeDir..." implies we should have a velocity texture.
+  // However, the current architecture only has uPositions and uOriginalPositions.
+  // Changing to a full velocity-integration system (Position + Velocity FBOs) would be a larger refactor.
+  // Given the constraints and the current code, I will simulate the effect by modifying position directly
+  // but using the calculated "velocity" vector as the displacement.
+  
+  // To prevent explosions:
+  float maxVelocity = 0.05;
+  if (length(velocity) > maxVelocity) {
+      velocity = normalize(velocity) * maxVelocity;
+  }
+  
+  // Store the speed in the w component for the render shader to use for coloring
+  float speed = length(velocity);
+  
+  gl_FragColor = vec4(pos, speed * 100.0); // Scale up speed for visual impact
 }
 `;
 

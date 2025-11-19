@@ -24,7 +24,8 @@ export const FBOParticles: React.FC = () => {
     uReturnStrength,
     uColorBase,
     uColorActive,
-    uPointSize
+    uPointSize,
+    uGravityMode, // New control
   } = useControls({
     uRingRadius: { value: 5.0, min: 1, max: 20, step: 0.1, label: 'Ring Radius' },
     uRingWidth: { value: 1.5, min: 0.1, max: 5, step: 0.1, label: 'Ring Width' },
@@ -33,6 +34,7 @@ export const FBOParticles: React.FC = () => {
     uColorBase: { value: '#1a80e6', label: 'Base Color' },
     uColorActive: { value: '#66e6ff', label: 'Active Color' },
     uPointSize: { value: 1.8, min: 0.1, max: 10, step: 0.1, label: 'Point Size' },
+    uGravityMode: { value: false, label: 'Antigravity Mode' }, // False = Attract, True = Repel
   });
 
   // 1. Setup FBOs (Frame Buffer Objects)
@@ -75,6 +77,9 @@ export const FBOParticles: React.FC = () => {
         uPositions: { value: initialDataTexture },
         uOriginalPositions: { value: initialDataTexture },
         uMouse: { value: new THREE.Vector2(-1000, -1000) }, // Start off-screen
+        uMouseVel: { value: new THREE.Vector2(0, 0) }, // New: Mouse Velocity
+        uAspect: { value: 1.0 }, // New: Aspect Ratio
+        uGravityMode: { value: 0 }, // New: Gravity Mode
         uTime: { value: 0 },
         uHover: { value: 0 },
         uRingRadius: { value: 5.0 },
@@ -136,6 +141,8 @@ export const FBOParticles: React.FC = () => {
 
   // Mouse tracking
   const mouseRef = useRef(new THREE.Vector2(0, 0));
+  const lastMouseRef = useRef(new THREE.Vector2(0, 0)); // New: Previous mouse position
+  const mouseVelRef = useRef(new THREE.Vector2(0, 0)); // New: Mouse velocity
   const hoverRef = useRef(0);
 
   useEffect(() => {
@@ -172,8 +179,30 @@ export const FBOParticles: React.FC = () => {
 
     // A. Update Simulation Uniforms
     simulationMaterial.uniforms.uTime.value = clock.elapsedTime;
+
+    // Calculate Mouse Velocity
+    // We need to do this before lerping the mouseRef for smooth visual movement, 
+    // but for velocity calculation we want the raw input difference or the lerped difference?
+    // Let's use the difference of the lerped values for smoother velocity
+
+    // Current lerped position (from previous frame)
+    const prevX = simulationMaterial.uniforms.uMouse.value.x;
+    const prevY = simulationMaterial.uniforms.uMouse.value.y;
+
     // Smoothly interpolate mouse position for fluid movement
     simulationMaterial.uniforms.uMouse.value.lerp(mouseRef.current, 0.1);
+
+    // Calculate velocity based on the change in the lerped value
+    // This gives us the "speed of the ring"
+    const currentX = simulationMaterial.uniforms.uMouse.value.x;
+    const currentY = simulationMaterial.uniforms.uMouse.value.y;
+
+    mouseVelRef.current.set(currentX - prevX, currentY - prevY);
+
+    simulationMaterial.uniforms.uMouseVel.value.copy(mouseVelRef.current);
+    simulationMaterial.uniforms.uAspect.value = viewport.aspect; // Update aspect ratio
+    simulationMaterial.uniforms.uGravityMode.value = uGravityMode ? 1 : 0; // Update gravity mode
+
     simulationMaterial.uniforms.uHover.value = THREE.MathUtils.lerp(
       simulationMaterial.uniforms.uHover.value,
       hoverRef.current,

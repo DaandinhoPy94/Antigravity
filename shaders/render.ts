@@ -36,11 +36,17 @@ void main() {
   
   // Color variation
   // Base blueish, shift to white/bright cyan on high velocity
-  // Base blueish, shift to white/bright cyan on high velocity
   vec3 colorBase = uColorBase;
   vec3 colorActive = uColorActive;
   
-  vColor = mix(colorBase, colorActive, velocity);
+  // Mix between base and active color based on velocity
+  vec3 finalColor = mix(colorBase, colorActive, smoothstep(0.0, 0.5, velocity));
+  
+  // Add an extra "white hot" layer for very high speeds
+  // If velocity > 0.5, mix towards white
+  finalColor = mix(finalColor, vec3(1.0), smoothstep(0.5, 1.0, velocity));
+  
+  vColor = finalColor;
   vAlpha = 0.6 + velocity * 0.4;
 }
 `;
