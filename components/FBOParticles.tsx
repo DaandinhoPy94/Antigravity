@@ -101,7 +101,7 @@ export const FBOParticles: React.FC = () => {
       vertexShader: renderVertexShader,
       fragmentShader: renderFragmentShader,
       transparent: true,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending,
       depthWrite: false,
     });
   }, []);

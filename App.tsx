@@ -1,6 +1,7 @@
 import React, { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { FBOParticles } from './components/FBOParticles';
+import { SceneBackground } from './components/SceneBackground';
 import { Loader } from '@react-three/drei';
 import { Leva } from 'leva';
 
@@ -30,7 +31,7 @@ const App: React.FC = () => {
         dpr={[1, 2]} // Handle high DPI screens
         gl={{ antialias: false, alpha: false }} // Optimize performance
       >
-        <color attach="background" args={['#ffffff']} />
+        <SceneBackground />
         <Suspense fallback={null}>
           <FBOParticles />
         </Suspense>
