@@ -9,26 +9,25 @@ export const generateParticles = (width: number, height: number) => {
   const length = width * height;
   const data = new Float32Array(length * 4);
 
-  // Grid settings
-  const aspectRatio = window.innerWidth / window.innerHeight;
-  const rangeX = 30 * aspectRatio; // Spread in X
-  const rangeY = 30; // Spread in Y
+  // Radial settings
+  const maxRadius = 25.0; // Maximum spread radius
+  const power = 2.0; // Higher power = more density at center
 
   for (let i = 0; i < length; i++) {
     const i4 = i * 4;
 
-    // Normalized grid coordinates (0 to 1)
-    // We use a grid + jitter to ensure even distribution without overlapping (Poisson-like)
-    const gridX = (i % width) / width;
-    const gridY = Math.floor(i / width) / height;
+    // Polar coordinates
+    // Random angle
+    const theta = Math.random() * Math.PI * 2;
 
-    // Map to world space centered at 0,0 with some random jitter
-    // Jitter amount depends on grid density
-    const jitter = 0.8 * (1 / width); 
-    
-    const x = (gridX + (Math.random() - 0.5) * jitter) * rangeX - (rangeX / 2);
-    const y = (gridY + (Math.random() - 0.5) * jitter) * rangeY - (rangeY / 2);
-    const z = 0; 
+    // Random radius with bias towards center
+    // Math.random() is 0..1. Squaring it makes it smaller on average.
+    const r = Math.pow(Math.random(), power) * maxRadius;
+
+    // Convert to Cartesian
+    const x = r * Math.cos(theta);
+    const y = r * Math.sin(theta);
+    const z = 0;
 
     data[i4] = x;
     data[i4 + 1] = y;

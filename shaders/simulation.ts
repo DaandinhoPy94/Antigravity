@@ -107,7 +107,20 @@ void main() {
   vec4 originalPos = texture2D(uOriginalPositions, uv);
   
   vec3 pos = currentPos.xyz;
-  vec3 refPos = originalPos.xyz;
+  vec3 originalOffset = originalPos.xyz; // Renamed for clarity
+  
+  // Calculate reference position relative to mouse
+  // We need to handle aspect ratio for the offset if we want a perfect circle?
+  // The offset was generated in "world space" (already aspect corrected in generation if we did it right, 
+  // but we removed aspect correction in generation to just use raw units).
+  // Let's assume originalOffset is in world units.
+  
+  // We need to un-aspect the mouse? Or aspect the offset?
+  // uMouse is in world coords (projected).
+  // originalOffset is in world coords.
+  // So we just add them.
+  
+  vec3 refPos = vec3(uMouse, 0.0) + originalOffset;
   // We use the w component for velocity magnitude storage for the render shader
   float life = currentPos.w; 
   

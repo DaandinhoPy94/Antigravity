@@ -7,8 +7,26 @@ import { useControls } from 'leva';
 
 // Imports
 import { generateParticles, getReferenceUVs } from '../utils/poisson';
-import { simulationVertexShader, simulationFragmentShader } from '../shaders/simulation';
+import { velocityVertexShader, velocityFragmentShader } from '../shaders/velocity';
+import { positionVertexShader, positionFragmentShader } from '../shaders/position';
 import { renderVertexShader, renderFragmentShader } from '../shaders/render';
+
+// Simple shader to copy a texture
+const copyVertexShader = `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+const copyFragmentShader = `
+uniform sampler2D uTexture;
+varying vec2 vUv;
+void main() {
+  gl_FragColor = texture2D(uTexture, vUv);
+}
+`;
 
 // Simulation Settings
 const SIZE = 128; // Texture width/height. 128x128 = 16,384 particles
@@ -38,17 +56,37 @@ export const FBOParticles: React.FC = () => {
   });
 
   // 1. Setup FBOs (Frame Buffer Objects)
-  // We need two buffers to swap back and forth (Ping-Pong technique)
-  const renderTargetA = useFBO(SIZE, SIZE, {
+  // We need TWO sets of buffers now: Position and Velocity
+  // And for each, we need two buffers to swap (Ping-Pong)
+
+  // POSITIONS
+  const positionsA = useFBO(SIZE, SIZE, {
     minFilter: THREE.NearestFilter,
     magFilter: THREE.NearestFilter,
     format: THREE.RGBAFormat,
-    type: THREE.FloatType, // Important for precision
+    type: THREE.FloatType,
+    stencilBuffer: false,
+    depthBuffer: false,
+  });
+  const positionsB = useFBO(SIZE, SIZE, {
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    format: THREE.RGBAFormat,
+    type: THREE.FloatType,
     stencilBuffer: false,
     depthBuffer: false,
   });
 
-  const renderTargetB = useFBO(SIZE, SIZE, {
+  // VELOCITIES
+  const velocitiesA = useFBO(SIZE, SIZE, {
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    format: THREE.RGBAFormat,
+    type: THREE.FloatType,
+    stencilBuffer: false,
+    depthBuffer: false,
+  });
+  const velocitiesB = useFBO(SIZE, SIZE, {
     minFilter: THREE.NearestFilter,
     magFilter: THREE.NearestFilter,
     format: THREE.RGBAFormat,
@@ -58,39 +96,55 @@ export const FBOParticles: React.FC = () => {
   });
 
   // Refs to manage ping-pong buffers
-  const targetRef = useRef(renderTargetA);
-  const sourceRef = useRef(renderTargetB);
+  const posTargetRef = useRef(positionsA);
+  const posSourceRef = useRef(positionsB);
+
+  const velTargetRef = useRef(velocitiesA);
+  const velSourceRef = useRef(velocitiesB);
 
   // 2. Generate Initial Data
   const initialDataTexture = useMemo(() => {
     const data = generateParticles(SIZE, SIZE);
+    console.log('Initial Data (First 4):', data[0], data[1], data[2], data[3]);
     const texture = new THREE.DataTexture(data, SIZE, SIZE, THREE.RGBAFormat, THREE.FloatType);
     texture.needsUpdate = true;
     return texture;
   }, []);
 
-  // 3. Simulation Material (The Physics Engine)
-  // This renders to the off-screen FBO
-  const simulationMaterial = useMemo(() => {
+  // 3. Simulation Materials (Physics Engine)
+
+  // A. Velocity Material (Calculates forces)
+  const velocityMaterial = useMemo(() => {
     return new THREE.ShaderMaterial({
       uniforms: {
-        uPositions: { value: initialDataTexture },
-        uOriginalPositions: { value: initialDataTexture },
-        uMouse: { value: new THREE.Vector2(-1000, -1000) }, // Start off-screen
-        uMouseVel: { value: new THREE.Vector2(0, 0) }, // New: Mouse Velocity
-        uAspect: { value: 1.0 }, // New: Aspect Ratio
-        uGravityMode: { value: 0 }, // New: Gravity Mode
+        uPositions: { value: null },
+        uVelocities: { value: null },
+        uOriginalPositions: { value: initialDataTexture }, // Original offsets
+        uMouse: { value: new THREE.Vector3(0, 0, 0) },
+        uMouseVel: { value: new THREE.Vector3(0, 0, 0) },
         uTime: { value: 0 },
-        uHover: { value: 0 },
-        uRingRadius: { value: 5.0 },
-        uRingWidth: { value: 1.5 },
-        uRingDisplacement: { value: 12.0 },
         uReturnStrength: { value: 0.05 },
+        uDamping: { value: 0.92 },
+        uRingRadius: { value: 5.0 },
+        uRingDisplacement: { value: 12.0 },
+        uGravityMode: { value: 0 },
       },
-      vertexShader: simulationVertexShader,
-      fragmentShader: simulationFragmentShader,
+      vertexShader: velocityVertexShader,
+      fragmentShader: velocityFragmentShader,
     });
   }, [initialDataTexture]);
+
+  // B. Position Material (Integrates velocity)
+  const positionMaterial = useMemo(() => {
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uPositions: { value: null },
+        uVelocities: { value: null },
+      },
+      vertexShader: positionVertexShader,
+      fragmentShader: positionFragmentShader,
+    });
+  }, []);
 
   // 4. Render Material (The Visuals)
   // This renders the actual points to the screen
@@ -135,14 +189,48 @@ export const FBOParticles: React.FC = () => {
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    const mesh = new THREE.Mesh(geom, simulationMaterial);
+
+    // We need two meshes, one for each pass, or re-use one mesh and swap material?
+    // Re-using mesh is fine, we just set material before render.
+    const mesh = new THREE.Mesh(geom, velocityMaterial);
     simScene.add(mesh);
-  }, [simScene, simulationMaterial]);
+  }, [simScene, velocityMaterial]);
+
+  // 6. Initialize FBOs (Run once)
+  useEffect(() => {
+    const mesh = simScene.children[0] as THREE.Mesh;
+    if (!mesh) return;
+
+    // Create a temporary copy material
+    const copyMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uTexture: { value: initialDataTexture },
+      },
+      vertexShader: copyVertexShader,
+      fragmentShader: copyFragmentShader,
+    });
+
+    mesh.material = copyMaterial;
+
+    // Render into positionsA
+    gl.setRenderTarget(posTargetRef.current);
+    gl.clear();
+    gl.render(simScene, simCamera);
+
+    // Render into positionsB (just in case)
+    gl.setRenderTarget(posSourceRef.current);
+    gl.clear();
+    gl.render(simScene, simCamera);
+
+    // Reset
+    gl.setRenderTarget(null);
+    mesh.material = velocityMaterial; // Restore
+  }, [gl, simScene, simCamera, initialDataTexture, velocityMaterial]);
 
   // Mouse tracking
-  const mouseRef = useRef(new THREE.Vector2(0, 0));
-  const lastMouseRef = useRef(new THREE.Vector2(0, 0)); // New: Previous mouse position
-  const mouseVelRef = useRef(new THREE.Vector2(0, 0)); // New: Mouse velocity
+  const mouseRef = useRef(new THREE.Vector3(0, 0, 0));
+  const lastMouseRef = useRef(new THREE.Vector3(0, 0, 0));
+  const mouseVelRef = useRef(new THREE.Vector3(0, 0, 0));
   const hoverRef = useRef(0);
 
   useEffect(() => {
@@ -157,7 +245,8 @@ export const FBOParticles: React.FC = () => {
       const distance = -camera.position.z / dir.z;
       const pos = camera.position.clone().add(dir.multiplyScalar(distance));
 
-      mouseRef.current.set(pos.x, pos.y);
+      mouseRef.current.set(pos.x, pos.y, 0); // Z is 0
+      // console.log('Mouse Move:', pos.x, pos.y);
       hoverRef.current = 1;
     };
 
@@ -177,63 +266,73 @@ export const FBOParticles: React.FC = () => {
   useFrame((state) => {
     const { gl, clock } = state;
 
-    // A. Update Simulation Uniforms
-    simulationMaterial.uniforms.uTime.value = clock.elapsedTime;
+    // --- STEP 1: UPDATE VELOCITY ---
 
-    // Calculate Mouse Velocity
-    // We need to do this before lerping the mouseRef for smooth visual movement, 
-    // but for velocity calculation we want the raw input difference or the lerped difference?
-    // Let's use the difference of the lerped values for smoother velocity
+    // Calculate Mouse Velocity (Delta)
+    // We use the raw mouseRef vs lastMouseRef for physics accuracy
+    const currentMouse = mouseRef.current;
+    const lastMouse = lastMouseRef.current;
 
-    // Current lerped position (from previous frame)
-    const prevX = simulationMaterial.uniforms.uMouse.value.x;
-    const prevY = simulationMaterial.uniforms.uMouse.value.y;
+    // Calculate velocity
+    mouseVelRef.current.subVectors(currentMouse, lastMouse);
 
-    // Smoothly interpolate mouse position for fluid movement
-    simulationMaterial.uniforms.uMouse.value.lerp(mouseRef.current, 0.1);
+    // Update last mouse for next frame
+    lastMouseRef.current.copy(currentMouse);
 
-    // Calculate velocity based on the change in the lerped value
-    // This gives us the "speed of the ring"
-    const currentX = simulationMaterial.uniforms.uMouse.value.x;
-    const currentY = simulationMaterial.uniforms.uMouse.value.y;
+    // Update Velocity Uniforms
+    velocityMaterial.uniforms.uTime.value = clock.elapsedTime;
+    velocityMaterial.uniforms.uPositions.value = posSourceRef.current.texture;
+    velocityMaterial.uniforms.uVelocities.value = velSourceRef.current.texture;
+    velocityMaterial.uniforms.uMouse.value.copy(mouseRef.current);
+    velocityMaterial.uniforms.uMouseVel.value.copy(mouseVelRef.current);
 
-    mouseVelRef.current.set(currentX - prevX, currentY - prevY);
+    velocityMaterial.uniforms.uReturnStrength.value = uReturnStrength;
+    velocityMaterial.uniforms.uRingRadius.value = uRingRadius;
+    velocityMaterial.uniforms.uRingDisplacement.value = uRingDisplacement;
+    velocityMaterial.uniforms.uGravityMode.value = uGravityMode ? 1 : 0;
 
-    simulationMaterial.uniforms.uMouseVel.value.copy(mouseVelRef.current);
-    simulationMaterial.uniforms.uAspect.value = viewport.aspect; // Update aspect ratio
-    simulationMaterial.uniforms.uGravityMode.value = uGravityMode ? 1 : 0; // Update gravity mode
+    // Render Velocity
+    // We render *into* the velocity target buffer
+    // Use the scene mesh we created (it has velocityMaterial by default? No we need to set it)
+    const mesh = simScene.children[0] as THREE.Mesh;
+    mesh.material = velocityMaterial;
 
-    simulationMaterial.uniforms.uHover.value = THREE.MathUtils.lerp(
-      simulationMaterial.uniforms.uHover.value,
-      hoverRef.current,
-      0.1
-    );
-    simulationMaterial.uniforms.uRingRadius.value = uRingRadius;
-    simulationMaterial.uniforms.uRingWidth.value = uRingWidth;
-    simulationMaterial.uniforms.uRingDisplacement.value = uRingDisplacement;
-    simulationMaterial.uniforms.uReturnStrength.value = uReturnStrength;
-
-    // Feed the *current* position (source) into the simulation
-    simulationMaterial.uniforms.uPositions.value = sourceRef.current.texture;
-
-    // B. Render the Simulation Step
-    // We render *into* the target buffer
-    gl.setRenderTarget(targetRef.current);
+    gl.setRenderTarget(velTargetRef.current);
     gl.clear();
     gl.render(simScene, simCamera);
 
-    // C. Feed new positions to the Render Material
-    // The 'target' now contains the updated positions
-    renderMaterial.uniforms.uPositions.value = targetRef.current.texture;
+    // --- STEP 2: UPDATE POSITION ---
+
+    // Update Position Uniforms
+    positionMaterial.uniforms.uPositions.value = posSourceRef.current.texture;
+    positionMaterial.uniforms.uVelocities.value = velTargetRef.current.texture; // Use the NEW velocity we just computed
+
+    // Render Position
+    mesh.material = positionMaterial;
+
+    gl.setRenderTarget(posTargetRef.current);
+    gl.clear();
+    gl.render(simScene, simCamera);
+
+    // --- STEP 3: UPDATE RENDER MATERIAL ---
+
+    // Feed new positions to the Render Material
+    renderMaterial.uniforms.uPositions.value = posTargetRef.current.texture;
     renderMaterial.uniforms.uPointSize.value = uPointSize;
     renderMaterial.uniforms.uColorBase.value.set(uColorBase);
     renderMaterial.uniforms.uColorActive.value.set(uColorActive);
 
-    // D. Swap Buffers for next frame
-    // Target becomes Source, Source becomes Target
-    const temp = sourceRef.current;
-    sourceRef.current = targetRef.current;
-    targetRef.current = temp;
+    // --- STEP 4: SWAP BUFFERS ---
+
+    // Swap Position Buffers
+    const tempPos = posSourceRef.current;
+    posSourceRef.current = posTargetRef.current;
+    posTargetRef.current = tempPos;
+
+    // Swap Velocity Buffers
+    const tempVel = velSourceRef.current;
+    velSourceRef.current = velTargetRef.current;
+    velTargetRef.current = tempVel;
 
     // Reset render target to screen
     gl.setRenderTarget(null);
