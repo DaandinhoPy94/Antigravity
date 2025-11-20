@@ -12,11 +12,11 @@ const App: React.FC = () => {
       {/* UI Overlay */}
       <div className="absolute top-0 left-0 z-10 p-8 text-black pointer-events-none">
         <h1 className="text-4xl font-bold tracking-tighter mb-2 bg-gradient-to-r from-cyan-400 to-blue-600 bg-clip-text text-transparent">
-          Antigravity
+          GPGPU Particles
         </h1>
         <p className="text-sm text-gray-600 max-w-md font-light leading-relaxed">
-          Antigravity is an overlay that can be used to create
-          a visual effect where particles are attracted to the mouse cursor.
+          A simulation of 65,536 particles computed entirely on the GPU using Frame Buffer Objects (FBO).
+          Move your mouse to interact with the field via a custom repulsion shader.
         </p>
         <div className="mt-4 flex gap-4 text-xs font-mono text-cyan-500/80">
           <span className="border border-cyan-500/30 px-2 py-1 rounded">Three.js</span>
